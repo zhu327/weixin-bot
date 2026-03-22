@@ -5,8 +5,8 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/url"
-	"time"
 )
 
 func baseInfo() map[string]any {
@@ -14,54 +14,67 @@ func baseInfo() map[string]any {
 }
 
 // GetUpdates calls POST /ilink/bot/getupdates.
-func GetUpdates(ctx context.Context, baseURL, token, buf string) (json.RawMessage, error) {
+func GetUpdates(client *http.Client, ctx context.Context, baseURL, token, buf string) (json.RawMessage, error) {
+	ctx, cancel := context.WithTimeout(ctx, TimeoutGetUpdates)
+	defer cancel()
 	body := map[string]any{
 		"get_updates_buf": buf,
 		"base_info":       baseInfo(),
 	}
-	return PostJSON(ctx, baseURL, "/ilink/bot/getupdates", body, token, 40*time.Second)
+	return PostJSON(client, ctx, baseURL, "/ilink/bot/getupdates", body, token)
 }
 
 // SendMessage calls POST /ilink/bot/sendmessage.
-func SendMessage(ctx context.Context, baseURL, token string, msg map[string]any) (json.RawMessage, error) {
+func SendMessage(client *http.Client, ctx context.Context, baseURL, token string, msg map[string]any) (json.RawMessage, error) {
+	ctx, cancel := context.WithTimeout(ctx, TimeoutSendMessage)
+	defer cancel()
 	body := map[string]any{
 		"msg":       msg,
 		"base_info": baseInfo(),
 	}
-	return PostJSON(ctx, baseURL, "/ilink/bot/sendmessage", body, token, 15*time.Second)
+	return PostJSON(client, ctx, baseURL, "/ilink/bot/sendmessage", body, token)
 }
 
 // GetConfig calls POST /ilink/bot/getconfig.
-func GetConfig(ctx context.Context, baseURL, token, userID, contextToken string) (json.RawMessage, error) {
+func GetConfig(client *http.Client, ctx context.Context, baseURL, token, userID, contextToken string) (json.RawMessage, error) {
+	ctx, cancel := context.WithTimeout(ctx, TimeoutGetConfig)
+	defer cancel()
 	body := map[string]any{
 		"ilink_user_id": userID,
 		"context_token": contextToken,
 		"base_info":     baseInfo(),
 	}
-	return PostJSON(ctx, baseURL, "/ilink/bot/getconfig", body, token, 15*time.Second)
+	return PostJSON(client, ctx, baseURL, "/ilink/bot/getconfig", body, token)
 }
 
 // SendTyping calls POST /ilink/bot/sendtyping. status 1 = start, 2 = stop.
-func SendTyping(ctx context.Context, baseURL, token, userID, ticket string, status int) (json.RawMessage, error) {
+func SendTyping(client *http.Client, ctx context.Context, baseURL, token, userID, ticket string, status int) (json.RawMessage, error) {
+	ctx, cancel := context.WithTimeout(ctx, TimeoutSendTyping)
+	defer cancel()
 	body := map[string]any{
 		"ilink_user_id": userID,
 		"typing_ticket": ticket,
 		"status":        status,
 		"base_info":     baseInfo(),
 	}
-	return PostJSON(ctx, baseURL, "/ilink/bot/sendtyping", body, token, 15*time.Second)
+	return PostJSON(client, ctx, baseURL, "/ilink/bot/sendtyping", body, token)
 }
 
 // FetchQRCode GET /ilink/bot/get_bot_qrcode?bot_type=3
-func FetchQRCode(ctx context.Context, baseURL string) (json.RawMessage, error) {
-	return GetJSON(ctx, baseURL, "/ilink/bot/get_bot_qrcode?bot_type=3", nil)
+func FetchQRCode(client *http.Client, ctx context.Context, baseURL string) (json.RawMessage, error) {
+	ctx, cancel := context.WithTimeout(ctx, TimeoutFetchQRCode)
+	defer cancel()
+	path := fmt.Sprintf("/ilink/bot/get_bot_qrcode?bot_type=%d", BotQRType)
+	return GetJSON(client, ctx, baseURL, path, nil)
 }
 
 // PollQRStatus GET /ilink/bot/get_qrcode_status?qrcode=...
-func PollQRStatus(ctx context.Context, baseURL, qrcode string) (json.RawMessage, error) {
+func PollQRStatus(client *http.Client, ctx context.Context, baseURL, qrcode string) (json.RawMessage, error) {
+	ctx, cancel := context.WithTimeout(ctx, TimeoutPollQRStatus)
+	defer cancel()
 	q := url.QueryEscape(qrcode)
-	path := fmt.Sprintf("/ilink/bot/get_qrcode_status?qrcode=%s", q)
-	return GetJSON(ctx, baseURL, path, map[string]string{
+	p := fmt.Sprintf("/ilink/bot/get_qrcode_status?qrcode=%s", q)
+	return GetJSON(client, ctx, baseURL, p, map[string]string{
 		"iLink-App-ClientVersion": "1",
 	})
 }
@@ -88,12 +101,12 @@ func BuildTextMessage(userID, contextToken, text string) (map[string]any, error)
 		"from_user_id":  "",
 		"to_user_id":    userID,
 		"client_id":     clientID,
-		"message_type":  2, // BOT
-		"message_state": 2, // FINISH
+		"message_type":  OutboundMessageTypeBot,
+		"message_state": OutboundMessageStateFinish,
 		"context_token": contextToken,
 		"item_list": []any{
 			map[string]any{
-				"type": 1,
+				"type": OutboundItemTypeText,
 				"text_item": map[string]any{
 					"text": text,
 				},

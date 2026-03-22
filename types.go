@@ -2,6 +2,9 @@ package weixinbot
 
 import "time"
 
+// MaxMessageTextRunes is the maximum UTF-8 code points sent per API message (long text is split).
+const MaxMessageTextRunes = 2000
+
 // Message type constants (WeChat wire values).
 const (
 	MessageTypeUser = 1

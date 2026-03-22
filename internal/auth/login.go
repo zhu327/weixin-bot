@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -16,7 +17,8 @@ import (
 const qrPollInterval = 2 * time.Second
 
 // Login performs QR login, optionally reusing an existing file when force is false.
-func Login(ctx context.Context, baseURL, tokenPath string, force bool) (*Data, error) {
+// httpClient is used for QR and polling requests; if nil, [http.DefaultClient] is used.
+func Login(ctx context.Context, httpClient *http.Client, baseURL, tokenPath string, force bool) (*Data, error) {
 	path, err := ResolveTokenPath(tokenPath)
 	if err != nil {
 		return nil, err
@@ -35,7 +37,7 @@ func Login(ctx context.Context, baseURL, tokenPath string, force bool) (*Data, e
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		qrRaw, err := api.FetchQRCode(ctx, baseURL)
+		qrRaw, err := api.FetchQRCode(httpClient, ctx, baseURL)
 		if err != nil {
 			return nil, err
 		}
@@ -60,7 +62,7 @@ func Login(ctx context.Context, baseURL, tokenPath string, force bool) (*Data, e
 			if err := ctx.Err(); err != nil {
 				return nil, err
 			}
-			stRaw, err := api.PollQRStatus(ctx, baseURL, qr.Qrcode)
+			stRaw, err := api.PollQRStatus(httpClient, ctx, baseURL, qr.Qrcode)
 			if err != nil {
 				return nil, err
 			}

@@ -3,7 +3,7 @@
 Go SDK for the WeChat iLink Bot API: QR login, credential persistence, long-poll messaging, and replies with automatic `context_token` handling.
 
 **Module:** [`github.com/zhu327/weixin-bot`](https://github.com/zhu327/weixin-bot)  
-**Import:** `github.com/zhu327/weixin-bot`（根目录包名 `weixinbot`，代码里仍写 `weixinbot.NewWeixinBot()`）
+**Import:** `github.com/zhu327/weixin-bot`（根目录包名 `weixinbot`）。推荐使用 `weixinbot.New()` 与 `*weixinbot.Bot`；`NewWeixinBot` / `WeixinBot` / `ApiError` 仍可作为已弃用别名使用。
 
 ## Repository layout
 
@@ -37,7 +37,7 @@ import "github.com/zhu327/weixin-bot"
 ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 defer stop()
 
-bot := weixinbot.NewWeixinBot()
+bot := weixinbot.New()
 if _, err := bot.Login(ctx, weixinbot.LoginOptions{}); err != nil {
 	log.Fatal(err)
 }
@@ -57,7 +57,7 @@ go run ./cmd/echo
 
 ## API notes
 
-- Credentials default to `~/.weixin-bot/credentials.json` (same family of SDKs as Node/Python).
+- Credentials default to `credentials.json` under the first writable directory among `~/.weixin-bot`, `$TMP/weixin-bot`, and `./.weixin-bot` (aligned with cloud-friendly defaults while staying compatible with the usual home layout).
 - Protocol details: see `PROTOCOL.md` in the upstream [weixin-bot](https://github.com/pinixai/weixin-bot) monorepo if you need field-level API documentation.
 
 ## License

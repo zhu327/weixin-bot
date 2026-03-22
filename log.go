@@ -1,20 +1,16 @@
 package weixinbot
 
-import (
-	"fmt"
-	"os"
-)
+import "fmt"
 
-func (b *WeixinBot) logf(format string, args ...any) {
-	fmt.Fprintf(os.Stderr, "[weixin-bot] "+format, args...)
+func (b *Bot) logf(format string, args ...any) {
+	b.logger.Info(fmt.Sprintf(format, args...))
 }
 
-func (b *WeixinBot) reportError(err error) {
+func (b *Bot) reportError(err error) {
 	if err == nil {
 		return
 	}
-	msg := err.Error()
-	b.logf("%s\n", msg)
+	b.logger.Error("weixinbot", "err", err)
 	if b.onError != nil {
 		b.onError(err)
 	}

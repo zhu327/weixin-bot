@@ -14,8 +14,8 @@ type retPayload struct {
 	ErrMsg  string `json:"errmsg"`
 }
 
-// parseJSONResponse parses a successful JSON body or returns an ApiError-like error.
-// The caller wraps into weixinbot.ApiError in the weixinbot package — here we use fmt.Errorf with structured data via a custom type in same package.
+// parseJSONResponse parses a successful JSON body or returns [*APIError].
+// The exported SDK maps these errors to its own APIError type.
 
 // APIError is the internal API error (weixinbot converts to its exported type).
 type APIError struct {

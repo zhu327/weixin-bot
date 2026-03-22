@@ -15,7 +15,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	bot := weixinbot.NewWeixinBot()
+	bot := weixinbot.New()
 	if _, err := bot.Login(ctx, weixinbot.LoginOptions{}); err != nil {
 		log.Fatal(err)
 	}

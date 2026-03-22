@@ -1,42 +1,85 @@
 package weixinbot
 
-import "github.com/zhu327/weixin-bot/internal/api"
+import (
+	"io"
+	"log/slog"
+	"net/http"
 
-// Option configures [WeixinBot].
-type Option func(*WeixinBot)
+	"github.com/zhu327/weixin-bot/internal/api"
+)
+
+// Option configures [Bot].
+type Option func(*Bot)
 
 // WithBaseURL sets the API base URL (default: api.DefaultBaseURL).
 func WithBaseURL(u string) Option {
-	return func(b *WeixinBot) {
+	return func(b *Bot) {
 		if u != "" {
 			b.baseURL = u
 		}
 	}
 }
 
-// WithTokenPath sets the credentials JSON path (default: ~/.weixin-bot/credentials.json).
+// WithTokenPath sets the credentials JSON path (default: first writable of ~/.weixin-bot, $TMP/weixin-bot, ./.weixin-bot).
 func WithTokenPath(p string) Option {
-	return func(b *WeixinBot) {
+	return func(b *Bot) {
 		b.tokenPath = p
 	}
 }
 
-// WithOnError sets a callback for handler and transport errors (after stderr logging).
+// WithOnError sets a callback for handler and transport errors (after logging).
 func WithOnError(fn func(error)) Option {
-	return func(b *WeixinBot) {
+	return func(b *Bot) {
 		b.onError = fn
 	}
 }
 
-// NewWeixinBot constructs a bot with optional configuration.
-func NewWeixinBot(opts ...Option) *WeixinBot {
-	b := &WeixinBot{
-		baseURL:       api.DefaultBaseURL,
-		contextTokens: make(map[string]string),
-		handlers:      nil,
+// WithHTTPClient sets the HTTP client used for all API and long-poll requests (including QR login).
+// If unset, [http.DefaultClient] is used by the low-level transport helpers when the field is empty;
+// [New] installs a non-nil *http.Client with no per-client timeout (deadlines come from context).
+func WithHTTPClient(c *http.Client) Option {
+	return func(b *Bot) {
+		if c != nil {
+			b.httpClient = c
+		}
+	}
+}
+
+// WithLogger sets the slog logger for SDK diagnostics. If unset, logs are discarded.
+func WithLogger(l *slog.Logger) Option {
+	return func(b *Bot) {
+		if l != nil {
+			b.logger = l
+		}
+	}
+}
+
+// WithContextTokenCacheMax sets the LRU capacity for per-user context_token entries (default 10000).
+func WithContextTokenCacheMax(n int) Option {
+	return func(b *Bot) {
+		if n > 0 {
+			b.tokenCache = newContextTokenCache(n)
+		}
+	}
+}
+
+// New constructs a bot with optional configuration.
+func New(opts ...Option) *Bot {
+	b := &Bot{
+		baseURL:    api.DefaultBaseURL,
+		tokenCache: newContextTokenCache(defaultContextTokenCacheMax),
+		httpClient: &http.Client{},
+		logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
 	for _, o := range opts {
 		o(b)
 	}
 	return b
+}
+
+// NewWeixinBot constructs a bot; it is equivalent to [New].
+//
+// Deprecated: use [New] instead.
+func NewWeixinBot(opts ...Option) *Bot {
+	return New(opts...)
 }

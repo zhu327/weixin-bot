@@ -3,12 +3,12 @@ package weixinbot
 import (
 	"context"
 	"errors"
-	"sync"
 	"testing"
+	"time"
 )
 
 func TestSessionExpired(t *testing.T) {
-	err := &ApiError{Code: -14, msg: "x"}
+	err := &APIError{Code: -14, msg: "x"}
 	if !isSessionExpired(err) {
 		t.Fatal()
 	}
@@ -18,20 +18,23 @@ func TestSessionExpired(t *testing.T) {
 }
 
 func TestDispatchPanicOnError(t *testing.T) {
-	var saw error
-	var mu sync.Mutex
-	b := NewWeixinBot(WithOnError(func(e error) {
-		mu.Lock()
-		saw = e
-		mu.Unlock()
+	errCh := make(chan error, 1)
+	b := New(WithOnError(func(e error) {
+		select {
+		case errCh <- e:
+		default:
+		}
 	}))
 	b.OnMessage(func(ctx context.Context, msg *IncomingMessage) error {
 		panic("boom")
 	})
 	b.dispatchMessage(context.Background(), &IncomingMessage{UserID: "u"})
-	mu.Lock()
-	defer mu.Unlock()
-	if saw == nil || saw.Error() != "panic: boom" {
-		t.Fatalf("got %v", saw)
+	select {
+	case saw := <-errCh:
+		if saw == nil || saw.Error() != "panic: boom" {
+			t.Fatalf("got %v", saw)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for handler error")
 	}
 }

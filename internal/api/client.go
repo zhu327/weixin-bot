@@ -6,15 +6,21 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
-	"time"
 )
 
 func normalizeBaseURL(baseURL string) string {
 	return strings.TrimRight(strings.TrimSpace(baseURL), "/")
 }
 
+func httpClientOrDefault(c *http.Client) *http.Client {
+	if c != nil {
+		return c
+	}
+	return http.DefaultClient
+}
+
 // PostJSON POSTs JSON to endpoint with Bearer token and context cancellation.
-func PostJSON(ctx context.Context, baseURL, endpoint string, body any, token string, timeout time.Duration) (json.RawMessage, error) {
+func PostJSON(client *http.Client, ctx context.Context, baseURL, endpoint string, body any, token string) (json.RawMessage, error) {
 	u := normalizeBaseURL(baseURL) + "/" + strings.TrimLeft(endpoint, "/")
 	b, err := json.Marshal(body)
 	if err != nil {
@@ -31,8 +37,7 @@ func PostJSON(ctx context.Context, baseURL, endpoint string, body any, token str
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
-	client := &http.Client{Timeout: timeout}
-	resp, err := client.Do(req)
+	resp, err := httpClientOrDefault(client).Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -40,7 +45,7 @@ func PostJSON(ctx context.Context, baseURL, endpoint string, body any, token str
 }
 
 // GetJSON performs a GET request without bot auth headers (QR endpoints).
-func GetJSON(ctx context.Context, baseURL, path string, extraHeaders map[string]string) (json.RawMessage, error) {
+func GetJSON(client *http.Client, ctx context.Context, baseURL, path string, extraHeaders map[string]string) (json.RawMessage, error) {
 	u := normalizeBaseURL(baseURL) + "/" + strings.TrimLeft(path, "/")
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
@@ -49,8 +54,7 @@ func GetJSON(ctx context.Context, baseURL, path string, extraHeaders map[string]
 	for k, v := range extraHeaders {
 		req.Header.Set(k, v)
 	}
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := httpClientOrDefault(client).Do(req)
 	if err != nil {
 		return nil, err
 	}

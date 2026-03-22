@@ -2,18 +2,26 @@ package weixinbot
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 )
 
-// ApiError is returned when the HTTP layer or API ret/errcode indicates failure.
-type ApiError struct {
+// Sentinel errors for programmatic handling with [errors.Is].
+var (
+	ErrMissingContextToken = errors.New("weixinbot: missing context token")
+	ErrEmptyMessageText    = errors.New("weixinbot: message text cannot be empty")
+	ErrNilMessage          = errors.New("weixinbot: nil message")
+)
+
+// APIError is returned when the HTTP layer or API ret/errcode indicates failure.
+type APIError struct {
 	Status  int
 	Code    int
 	Payload json.RawMessage
 	msg     string
 }
 
-func (e *ApiError) Error() string {
+func (e *APIError) Error() string {
 	if e == nil {
 		return ""
 	}
@@ -21,16 +29,15 @@ func (e *ApiError) Error() string {
 }
 
 // SessionExpired reports whether the API indicated an expired session (errcode -14).
-func (e *ApiError) SessionExpired() bool {
+func (e *APIError) SessionExpired() bool {
 	return e != nil && e.Code == -14
 }
 
-// Unwrap is not used; ApiError is a concrete type for errors.Is helpers if needed later.
+// ApiError is a type alias for [APIError].
+//
+// Deprecated: use [APIError] instead.
+type ApiError = APIError
 
 func fmtMissingContextToken(userID string) error {
-	return fmt.Errorf("no cached context token for user %s: reply to an incoming message first", userID)
-}
-
-func errEmptyMessageText() error {
-	return fmt.Errorf("message text cannot be empty")
+	return fmt.Errorf("%w for user %s: reply to an incoming message first", ErrMissingContextToken, userID)
 }

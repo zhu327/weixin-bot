@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-func (b *WeixinBot) rememberContext(msg *WeixinMessage) {
+func (b *Bot) rememberContext(msg *WeixinMessage) {
 	var userID string
 	if msg.MessageType == MessageTypeUser {
 		userID = msg.FromUserID
@@ -14,9 +14,7 @@ func (b *WeixinBot) rememberContext(msg *WeixinMessage) {
 		userID = msg.ToUserID
 	}
 	if userID != "" && msg.ContextToken != "" {
-		b.mu.Lock()
-		b.contextTokens[userID] = msg.ContextToken
-		b.mu.Unlock()
+		b.tokenCache.Set(userID, msg.ContextToken)
 	}
 }
 

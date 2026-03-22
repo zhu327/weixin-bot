@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
+	"net/http"
 	"sync"
 	"time"
 
@@ -15,38 +17,42 @@ import (
 // MessageHandler processes an inbound user message.
 type MessageHandler func(ctx context.Context, msg *IncomingMessage) error
 
-// LoginOptions controls [WeixinBot.Login].
+// LoginOptions controls [Bot.Login].
 type LoginOptions struct {
 	Force bool
 }
 
-// WeixinBot is the main SDK entrypoint (Node WeixinBot).
-type WeixinBot struct {
-	baseURL   string
-	tokenPath string
-	onError   func(error)
+// Bot is the main SDK entrypoint (Node WeixinBot).
+type Bot struct {
+	baseURL    string
+	tokenPath  string
+	onError    func(error)
+	httpClient *http.Client
+	logger     *slog.Logger
 
 	handlers []MessageHandler
 
-	mu            sync.Mutex
-	contextTokens map[string]string
-	credentials   *Credentials
-	cursor        string
+	mu          sync.Mutex
+	tokenCache  *contextTokenCache
+	credentials *Credentials
+	cursor      string
 
 	runMu     sync.Mutex
 	activeRun *runSession
 }
+
+// WeixinBot is a type alias for [Bot].
+//
+// Deprecated: use [Bot] instead.
+type WeixinBot = Bot
 
 type runSession struct {
 	done chan struct{}
 	err  error
 }
 
-// getUpdatesHook is swapped in tests.
-var getUpdatesHook func(ctx context.Context, baseURL, token, buf string) (json.RawMessage, error)
-
 // OnMessage registers a handler (multiple handlers run concurrently per message).
-func (b *WeixinBot) OnMessage(h MessageHandler) *WeixinBot {
+func (b *Bot) OnMessage(h MessageHandler) *Bot {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.handlers = append(b.handlers, h)
@@ -54,7 +60,7 @@ func (b *WeixinBot) OnMessage(h MessageHandler) *WeixinBot {
 }
 
 // Login performs QR or loads stored credentials (see spec).
-func (b *WeixinBot) Login(ctx context.Context, opts LoginOptions) (*Credentials, error) {
+func (b *Bot) Login(ctx context.Context, opts LoginOptions) (*Credentials, error) {
 	path, err := auth.ResolveTokenPath(b.tokenPath)
 	if err != nil {
 		return nil, err
@@ -66,7 +72,7 @@ func (b *WeixinBot) Login(ctx context.Context, opts LoginOptions) (*Credentials,
 	}
 	b.mu.Unlock()
 
-	d, err := auth.Login(ctx, b.baseURL, path, opts.Force)
+	d, err := auth.Login(ctx, b.httpClient, b.baseURL, path, opts.Force)
 	if err != nil {
 		return nil, err
 	}
@@ -84,7 +90,7 @@ func (b *WeixinBot) Login(ctx context.Context, opts LoginOptions) (*Credentials,
 }
 
 // Run starts the long-poll loop until ctx is canceled.
-func (b *WeixinBot) Run(ctx context.Context) error {
+func (b *Bot) Run(ctx context.Context) error {
 	b.runMu.Lock()
 	if b.activeRun != nil {
 		s := b.activeRun
@@ -106,7 +112,7 @@ func (b *WeixinBot) Run(ctx context.Context) error {
 	return err
 }
 
-func (b *WeixinBot) runLoop(ctx context.Context) error {
+func (b *Bot) runLoop(ctx context.Context) error {
 	if _, err := b.ensureCredentials(ctx); err != nil {
 		return err
 	}
@@ -191,24 +197,21 @@ func (b *WeixinBot) runLoop(ctx context.Context) error {
 	}
 }
 
-func (b *WeixinBot) doGetUpdates(ctx context.Context, cred *Credentials) (json.RawMessage, error) {
+func (b *Bot) doGetUpdates(ctx context.Context, cred *Credentials) (json.RawMessage, error) {
 	b.mu.Lock()
 	buf := b.cursor
 	b.mu.Unlock()
 	base := cred.BaseURL
-	if getUpdatesHook != nil {
-		return getUpdatesHook(ctx, base, cred.Token, buf)
-	}
-	raw, err := api.GetUpdates(ctx, base, cred.Token, buf)
+	raw, err := api.GetUpdates(b.httpClient, ctx, base, cred.Token, buf)
 	return raw, wrapAPIErr(err)
 }
 
 func isSessionExpired(err error) bool {
-	var ae *ApiError
+	var ae *APIError
 	return errors.As(err, &ae) && ae.SessionExpired()
 }
 
-func (b *WeixinBot) sleepBackoff(ctx context.Context, d time.Duration) error {
+func (b *Bot) sleepBackoff(ctx context.Context, d time.Duration) error {
 	t := time.NewTimer(d)
 	defer t.Stop()
 	select {
@@ -219,7 +222,7 @@ func (b *WeixinBot) sleepBackoff(ctx context.Context, d time.Duration) error {
 	}
 }
 
-func (b *WeixinBot) ensureCredentials(ctx context.Context) (*Credentials, error) {
+func (b *Bot) ensureCredentials(ctx context.Context) (*Credentials, error) {
 	b.mu.Lock()
 	if b.credentials != nil {
 		c := b.credentials
@@ -253,39 +256,34 @@ func (b *WeixinBot) ensureCredentials(ctx context.Context) (*Credentials, error)
 	return b.credentials, nil
 }
 
-func (b *WeixinBot) dispatchMessage(ctx context.Context, msg *IncomingMessage) {
+func (b *Bot) dispatchMessage(ctx context.Context, msg *IncomingMessage) {
 	b.mu.Lock()
 	hcopy := append([]MessageHandler(nil), b.handlers...)
 	b.mu.Unlock()
 	if len(hcopy) == 0 {
 		return
 	}
-	var wg sync.WaitGroup
 	for _, h := range hcopy {
-		wg.Add(1)
-		go func(h MessageHandler) {
+		h := h
+		go func() {
 			defer func() {
 				if r := recover(); r != nil {
 					b.reportError(fmt.Errorf("panic: %v", r))
 				}
-				wg.Done()
 			}()
 			if err := h(ctx, msg); err != nil {
 				b.reportError(err)
 			}
-		}(h)
+		}()
 	}
-	wg.Wait()
 }
 
 // Reply sends a text reply and clears typing (errors from StopTyping ignored).
-func (b *WeixinBot) Reply(ctx context.Context, msg *IncomingMessage, text string) error {
+func (b *Bot) Reply(ctx context.Context, msg *IncomingMessage, text string) error {
 	if msg == nil {
-		return fmt.Errorf("nil message")
+		return fmt.Errorf("%w", ErrNilMessage)
 	}
-	b.mu.Lock()
-	b.contextTokens[msg.UserID] = msg.contextToken
-	b.mu.Unlock()
+	b.tokenCache.Set(msg.UserID, msg.contextToken)
 	if err := b.sendText(ctx, msg.UserID, text, msg.contextToken); err != nil {
 		return err
 	}
@@ -294,30 +292,28 @@ func (b *WeixinBot) Reply(ctx context.Context, msg *IncomingMessage, text string
 }
 
 // Send sends text using the cached context token for userID.
-func (b *WeixinBot) Send(ctx context.Context, userID, text string) error {
-	b.mu.Lock()
-	tok, ok := b.contextTokens[userID]
-	b.mu.Unlock()
+func (b *Bot) Send(ctx context.Context, userID, text string) error {
+	tok, ok := b.tokenCache.Get(userID)
 	if !ok || tok == "" {
 		return fmtMissingContextToken(userID)
 	}
 	return b.sendText(ctx, userID, text, tok)
 }
 
-func (b *WeixinBot) sendText(ctx context.Context, userID, text, contextToken string) error {
+func (b *Bot) sendText(ctx context.Context, userID, text, contextToken string) error {
 	if text == "" {
-		return errEmptyMessageText()
+		return fmt.Errorf("%w", ErrEmptyMessageText)
 	}
 	cred, err := b.ensureCredentials(ctx)
 	if err != nil {
 		return err
 	}
-	for _, chunk := range chunkRunes(text, 2000) {
+	for _, chunk := range chunkRunes(text, MaxMessageTextRunes) {
 		msg, err := api.BuildTextMessage(userID, contextToken, chunk)
 		if err != nil {
 			return err
 		}
-		if _, err := api.SendMessage(ctx, cred.BaseURL, cred.Token, msg); err != nil {
+		if _, err := api.SendMessage(b.httpClient, ctx, cred.BaseURL, cred.Token, msg); err != nil {
 			return wrapAPIErr(err)
 		}
 	}
@@ -325,22 +321,20 @@ func (b *WeixinBot) sendText(ctx context.Context, userID, text, contextToken str
 }
 
 // SendTyping requests a typing indicator for userID.
-func (b *WeixinBot) SendTyping(ctx context.Context, userID string) error {
-	return b.sendTypingStatus(ctx, userID, 1, true)
+func (b *Bot) SendTyping(ctx context.Context, userID string) error {
+	return b.sendTypingStatus(ctx, userID, api.TypingStatusStart, true)
 }
 
 // StopTyping clears the typing indicator (no-op if no cached context).
-func (b *WeixinBot) StopTyping(ctx context.Context, userID string) error {
-	return b.sendTypingStatus(ctx, userID, 2, false)
+func (b *Bot) StopTyping(ctx context.Context, userID string) error {
+	return b.sendTypingStatus(ctx, userID, api.TypingStatusStop, false)
 }
 
 // sendTypingStatus calls sendtyping with status 1=start, 2=stop. logIfNoTicket applies when status is start.
-func (b *WeixinBot) sendTypingStatus(ctx context.Context, userID string, status int, logIfNoTicket bool) error {
-	b.mu.Lock()
-	ct, ok := b.contextTokens[userID]
-	b.mu.Unlock()
+func (b *Bot) sendTypingStatus(ctx context.Context, userID string, status int, logIfNoTicket bool) error {
+	ct, ok := b.tokenCache.Get(userID)
 	if !ok || ct == "" {
-		if status == 1 {
+		if status == api.TypingStatusStart {
 			return fmtMissingContextToken(userID)
 		}
 		return nil
@@ -349,7 +343,7 @@ func (b *WeixinBot) sendTypingStatus(ctx context.Context, userID string, status 
 	if err != nil {
 		return err
 	}
-	raw, err := api.GetConfig(ctx, cred.BaseURL, cred.Token, userID, ct)
+	raw, err := api.GetConfig(b.httpClient, ctx, cred.BaseURL, cred.Token, userID, ct)
 	if err != nil {
 		return wrapAPIErr(err)
 	}
@@ -360,14 +354,14 @@ func (b *WeixinBot) sendTypingStatus(ctx context.Context, userID string, status 
 		}
 		return nil
 	}
-	_, err = api.SendTyping(ctx, cred.BaseURL, cred.Token, userID, ticket, status)
+	_, err = api.SendTyping(b.httpClient, ctx, cred.BaseURL, cred.Token, userID, ticket, status)
 	return wrapAPIErr(err)
 }
 
 // clearCursorAndContextTokens resets long-poll cursor and per-user context cache. b.mu must be held.
-func (b *WeixinBot) clearCursorAndContextTokens() {
+func (b *Bot) clearCursorAndContextTokens() {
 	b.cursor = ""
-	b.contextTokens = make(map[string]string)
+	b.tokenCache.Clear()
 }
 
 func wrapAPIErr(err error) error {
@@ -376,7 +370,7 @@ func wrapAPIErr(err error) error {
 	}
 	var ae *api.APIError
 	if errors.As(err, &ae) {
-		return &ApiError{Status: ae.Status, Code: ae.Code, Payload: ae.Payload, msg: ae.Error()}
+		return &APIError{Status: ae.Status, Code: ae.Code, Payload: ae.Payload, msg: ae.Error()}
 	}
 	return err
 }
