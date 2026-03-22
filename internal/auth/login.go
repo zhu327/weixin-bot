@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
+	"github.com/mdp/qrterminal/v3"
 	"github.com/zhu327/weixin-bot/internal/api"
 )
 
@@ -44,8 +46,14 @@ func Login(ctx context.Context, baseURL, tokenPath string, force bool) (*Data, e
 		if err := json.Unmarshal(qrRaw, &qr); err != nil {
 			return nil, err
 		}
-		fmt.Fprintf(os.Stderr, "[weixin-bot] 在微信中打开以下链接完成登录:\n")
-		fmt.Fprintf(os.Stderr, "%s\n", qr.QrcodeImgContent)
+		link := strings.TrimSpace(qr.QrcodeImgContent)
+		fmt.Fprintf(os.Stderr, "[weixin-bot] 在微信中打开以下链接完成登录，或用微信扫描下方二维码:\n")
+		fmt.Fprintf(os.Stderr, "%s\n", link)
+		if strings.HasPrefix(link, "http://") || strings.HasPrefix(link, "https://") {
+			fmt.Fprintln(os.Stderr)
+			qrterminal.GenerateHalfBlock(link, qrterminal.M, os.Stderr)
+			fmt.Fprintln(os.Stderr)
+		}
 
 		var lastStatus string
 		for {
