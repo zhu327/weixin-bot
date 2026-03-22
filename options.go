@@ -4,6 +4,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/zhu327/weixin-bot/internal/api"
 )
@@ -20,7 +21,7 @@ func WithBaseURL(u string) Option {
 	}
 }
 
-// WithTokenPath sets the credentials JSON path (default: first writable of ~/.weixin-bot, $TMP/weixin-bot, ./.weixin-bot).
+// WithTokenPath sets the credentials JSON path (default: first writable of ~/.weixin-bot, ./.weixin-bot, $TMP/weixin-bot).
 func WithTokenPath(p string) Option {
 	return func(b *Bot) {
 		b.tokenPath = p
@@ -60,6 +61,15 @@ func WithContextTokenCacheMax(n int) Option {
 		if n > 0 {
 			b.tokenCache = newContextTokenCache(n)
 		}
+	}
+}
+
+// WithHandlerDrainTimeout sets how long [Bot.Run] waits for in-flight message handlers after the
+// long-poll loop stops. Zero selects the default (30s). A negative value skips waiting (handlers may
+// still be running when Run returns).
+func WithHandlerDrainTimeout(d time.Duration) Option {
+	return func(b *Bot) {
+		b.handlerDrainWait = d
 	}
 }
 

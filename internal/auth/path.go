@@ -6,17 +6,18 @@ import (
 	"path/filepath"
 )
 
-// DefaultTokenDir prefers ~/.weixin-bot, then a temp-dir subfolder, then ./.weixin-bot under the
-// working directory, using the first path that can be created and is writable.
+// DefaultTokenDir picks the first writable directory among: ~/.weixin-bot, ./.weixin-bot (cwd),
+// then $TMP/weixin-bot. Cwd is preferred over the system temp dir so credentials survive typical
+// /tmp cleanup when home is unavailable (e.g. some containers).
 func DefaultTokenDir() (string, error) {
 	var candidates []string
 	if home, err := os.UserHomeDir(); err == nil && home != "" {
 		candidates = append(candidates, filepath.Join(home, ".weixin-bot"))
 	}
-	candidates = append(candidates, filepath.Join(os.TempDir(), "weixin-bot"))
 	if wd, err := os.Getwd(); err == nil && wd != "" {
 		candidates = append(candidates, filepath.Join(wd, ".weixin-bot"))
 	}
+	candidates = append(candidates, filepath.Join(os.TempDir(), "weixin-bot"))
 	for _, dir := range candidates {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			continue

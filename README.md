@@ -57,7 +57,9 @@ go run ./cmd/echo
 
 ## API notes
 
-- Credentials default to `credentials.json` under the first writable directory among `~/.weixin-bot`, `$TMP/weixin-bot`, and `./.weixin-bot` (aligned with cloud-friendly defaults while staying compatible with the usual home layout).
+- **Credentials path:** defaults to `credentials.json` under the first writable directory in order: `~/.weixin-bot`, `./.weixin-bot` (current working directory), then `$TMP/weixin-bot`. Cwd is tried before the temp dir so tokens are less likely to disappear with `/tmp` cleanup when home is unavailable.
+- **After `Run` returns:** the SDK waits (by default up to 30s) for message handlers that are still running, so short graceful work can finish. Use `weixinbot.WithHandlerDrainTimeout` to change the limit, or a negative duration to skip waiting.
+- **QR login UX:** set `LoginOptions.OnQRCode` / `OnStatus` to receive the QR link and status strings instead of printing to stderr (useful in Kubernetes or headless environments).
 - Protocol details: see `PROTOCOL.md` in the upstream [weixin-bot](https://github.com/pinixai/weixin-bot) monorepo if you need field-level API documentation.
 
 ## License

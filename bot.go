@@ -20,6 +20,12 @@ type MessageHandler func(ctx context.Context, msg *IncomingMessage) error
 // LoginOptions controls [Bot.Login].
 type LoginOptions struct {
 	Force bool
+	// OnQRCode is called when a new QR session starts (imageURL is qrcode_img_content, qrcode is the poll token).
+	// If nil, the default prints the link and a terminal QR to [os.Stderr].
+	OnQRCode func(imageURL string, qrcode string)
+	// OnStatus is called when the QR status changes (e.g. scaned, confirmed, expired).
+	// If nil, the default prints short status lines to [os.Stderr].
+	OnStatus func(status string)
 }
 
 // Bot is the main SDK entrypoint (Node WeixinBot).
@@ -30,7 +36,12 @@ type Bot struct {
 	httpClient *http.Client
 	logger     *slog.Logger
 
-	handlers []MessageHandler
+	// handlerDrainWait is how long [Run] waits for in-flight message handlers after the poll loop stops.
+	// Zero means 30s. Negative means do not wait.
+	handlerDrainWait time.Duration
+
+	handlers  []MessageHandler
+	handlerWg sync.WaitGroup
 
 	mu          sync.Mutex
 	tokenCache  *contextTokenCache
@@ -72,7 +83,10 @@ func (b *Bot) Login(ctx context.Context, opts LoginOptions) (*Credentials, error
 	}
 	b.mu.Unlock()
 
-	d, err := auth.Login(ctx, b.httpClient, b.baseURL, path, opts.Force)
+	d, err := auth.Login(ctx, b.httpClient, b.baseURL, path, opts.Force, &auth.LoginCallbacks{
+		OnQRCode: opts.OnQRCode,
+		OnStatus: opts.OnStatus,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -85,7 +99,7 @@ func (b *Bot) Login(ctx context.Context, opts LoginOptions) (*Credentials, error
 	}
 	b.mu.Unlock()
 
-	b.logf("Logged in as %s\n", cred.UserID)
+	b.logger.Info("logged in", "user_id", cred.UserID)
 	return cred, nil
 }
 
@@ -103,6 +117,7 @@ func (b *Bot) Run(ctx context.Context) error {
 	b.runMu.Unlock()
 
 	err := b.runLoop(ctx)
+	b.waitHandlersDrain()
 
 	b.runMu.Lock()
 	s.err = err
@@ -112,17 +127,39 @@ func (b *Bot) Run(ctx context.Context) error {
 	return err
 }
 
+const defaultHandlerDrainTimeout = 30 * time.Second
+
+func (b *Bot) waitHandlersDrain() {
+	d := b.handlerDrainWait
+	if d < 0 {
+		return
+	}
+	if d == 0 {
+		d = defaultHandlerDrainTimeout
+	}
+	done := make(chan struct{})
+	go func() {
+		b.handlerWg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(d):
+		b.logger.Warn("message handlers still running after drain wait", slog.Duration("timeout", d))
+	}
+}
+
 func (b *Bot) runLoop(ctx context.Context) error {
 	if _, err := b.ensureCredentials(ctx); err != nil {
 		return err
 	}
-	b.logf("Long-poll loop started.\n")
+	b.logger.Info("long-poll loop started")
 	retry := time.Second
 
 	for {
 		select {
 		case <-ctx.Done():
-			b.logf("Long-poll loop stopped.\n")
+			b.logger.Info("long-poll loop stopped", "reason", "context_canceled")
 			return nil
 		default:
 		}
@@ -131,7 +168,7 @@ func (b *Bot) runLoop(ctx context.Context) error {
 		if err != nil {
 			b.reportError(err)
 			if err := b.sleepBackoff(ctx, retry); err != nil {
-				b.logf("Long-poll loop stopped.\n")
+				b.logger.Info("long-poll loop stopped", "reason", "backoff_canceled")
 				return err
 			}
 			retry = min(retry*2, 10*time.Second)
@@ -141,11 +178,11 @@ func (b *Bot) runLoop(ctx context.Context) error {
 		raw, err := b.doGetUpdates(ctx, cred)
 		if err != nil {
 			if ctx.Err() != nil {
-				b.logf("Long-poll loop stopped.\n")
+				b.logger.Info("long-poll loop stopped", "reason", "context_canceled")
 				return nil
 			}
 			if isSessionExpired(err) {
-				b.logf("Session expired. Waiting for a fresh QR login...\n")
+				b.logger.Info("session expired; waiting for fresh QR login")
 				b.mu.Lock()
 				b.credentials = nil
 				b.clearCursorAndContextTokens()
@@ -160,7 +197,7 @@ func (b *Bot) runLoop(ctx context.Context) error {
 			}
 			b.reportError(err)
 			if err := b.sleepBackoff(ctx, retry); err != nil {
-				b.logf("Long-poll loop stopped.\n")
+				b.logger.Info("long-poll loop stopped", "reason", "backoff_canceled")
 				return err
 			}
 			retry = min(retry*2, 10*time.Second)
@@ -265,7 +302,9 @@ func (b *Bot) dispatchMessage(ctx context.Context, msg *IncomingMessage) {
 	}
 	for _, h := range hcopy {
 		h := h
+		b.handlerWg.Add(1)
 		go func() {
+			defer b.handlerWg.Done()
 			defer func() {
 				if r := recover(); r != nil {
 					b.reportError(fmt.Errorf("panic: %v", r))
@@ -350,7 +389,7 @@ func (b *Bot) sendTypingStatus(ctx context.Context, userID string, status int, l
 	ticket, ok := api.DecodeTypingTicket(raw)
 	if !ok {
 		if logIfNoTicket {
-			b.logf("sendTyping: no typing_ticket returned by getconfig\n")
+			b.logger.Debug("sendTyping: no typing_ticket in getconfig response")
 		}
 		return nil
 	}

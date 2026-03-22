@@ -16,9 +16,18 @@ import (
 
 const qrPollInterval = 2 * time.Second
 
+// LoginCallbacks customizes QR login UX. Nil fields keep the default behavior (print to [os.Stderr]).
+type LoginCallbacks struct {
+	// OnQRCode is invoked when a new QR session starts. imageURL is qrcode_img_content; qrcode is the opaque token used for polling.
+	OnQRCode func(imageURL string, qrcode string)
+	// OnStatus is invoked when the QR status changes (e.g. scaned, confirmed, expired).
+	OnStatus func(status string)
+}
+
 // Login performs QR login, optionally reusing an existing file when force is false.
 // httpClient is used for QR and polling requests; if nil, [http.DefaultClient] is used.
-func Login(ctx context.Context, httpClient *http.Client, baseURL, tokenPath string, force bool) (*Data, error) {
+// callbacks may be nil; non-nil callbacks override the corresponding default behavior only for set fields.
+func Login(ctx context.Context, httpClient *http.Client, baseURL, tokenPath string, force bool, callbacks *LoginCallbacks) (*Data, error) {
 	path, err := ResolveTokenPath(tokenPath)
 	if err != nil {
 		return nil, err
@@ -49,13 +58,7 @@ func Login(ctx context.Context, httpClient *http.Client, baseURL, tokenPath stri
 			return nil, err
 		}
 		link := strings.TrimSpace(qr.QrcodeImgContent)
-		fmt.Fprintf(os.Stderr, "[weixin-bot] 在微信中打开以下链接完成登录，或用微信扫描下方二维码:\n")
-		fmt.Fprintf(os.Stderr, "%s\n", link)
-		if strings.HasPrefix(link, "http://") || strings.HasPrefix(link, "https://") {
-			fmt.Fprintln(os.Stderr)
-			qrterminal.GenerateHalfBlock(link, qrterminal.M, os.Stderr)
-			fmt.Fprintln(os.Stderr)
-		}
+		notifyQRCode(callbacks, link, qr.Qrcode)
 
 		var lastStatus string
 		for {
@@ -77,14 +80,7 @@ func Login(ctx context.Context, httpClient *http.Client, baseURL, tokenPath stri
 				return nil, err
 			}
 			if st.Status != lastStatus {
-				switch st.Status {
-				case "scaned":
-					fmt.Fprintf(os.Stderr, "[weixin-bot] QR code scanned. Confirm the login inside WeChat.\n")
-				case "confirmed":
-					fmt.Fprintf(os.Stderr, "[weixin-bot] Login confirmed.\n")
-				case "expired":
-					fmt.Fprintf(os.Stderr, "[weixin-bot] QR code expired. Requesting a new one...\n")
-				}
+				notifyStatus(callbacks, st.Status)
 				lastStatus = st.Status
 			}
 			if st.Status == "confirmed" {
@@ -115,5 +111,34 @@ func Login(ctx context.Context, httpClient *http.Client, baseURL, tokenPath stri
 			case <-time.After(qrPollInterval):
 			}
 		}
+	}
+}
+
+func notifyQRCode(cb *LoginCallbacks, imageURL, qrcode string) {
+	if cb != nil && cb.OnQRCode != nil {
+		cb.OnQRCode(imageURL, qrcode)
+		return
+	}
+	fmt.Fprintf(os.Stderr, "[weixin-bot] 在微信中打开以下链接完成登录，或用微信扫描下方二维码:\n")
+	fmt.Fprintf(os.Stderr, "%s\n", imageURL)
+	if strings.HasPrefix(imageURL, "http://") || strings.HasPrefix(imageURL, "https://") {
+		fmt.Fprintln(os.Stderr)
+		qrterminal.GenerateHalfBlock(imageURL, qrterminal.M, os.Stderr)
+		fmt.Fprintln(os.Stderr)
+	}
+}
+
+func notifyStatus(cb *LoginCallbacks, status string) {
+	if cb != nil && cb.OnStatus != nil {
+		cb.OnStatus(status)
+		return
+	}
+	switch status {
+	case "scaned":
+		fmt.Fprintf(os.Stderr, "[weixin-bot] QR code scanned. Confirm the login inside WeChat.\n")
+	case "confirmed":
+		fmt.Fprintf(os.Stderr, "[weixin-bot] Login confirmed.\n")
+	case "expired":
+		fmt.Fprintf(os.Stderr, "[weixin-bot] QR code expired. Requesting a new one...\n")
 	}
 }
