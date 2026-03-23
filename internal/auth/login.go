@@ -27,7 +27,13 @@ type LoginCallbacks struct {
 // Login performs QR login, optionally reusing an existing file when force is false.
 // httpClient is used for QR and polling requests; if nil, [http.DefaultClient] is used.
 // callbacks may be nil; non-nil callbacks override the corresponding default behavior only for set fields.
-func Login(ctx context.Context, httpClient *http.Client, baseURL, tokenPath string, force bool, callbacks *LoginCallbacks) (*Data, error) {
+func Login(
+	ctx context.Context,
+	httpClient *http.Client,
+	baseURL, tokenPath string,
+	force bool,
+	callbacks *LoginCallbacks,
+) (*Data, error) {
 	path, err := ResolveTokenPath(tokenPath)
 	if err != nil {
 		return nil, err

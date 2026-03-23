@@ -16,3 +16,17 @@ func TestDetectType(t *testing.T) {
 		t.Fatal()
 	}
 }
+
+func TestContextToken(t *testing.T) {
+	msg := &IncomingMessage{contextToken: "tok123"}
+	if msg.ContextToken() != "tok123" {
+		t.Fatalf("got %q", msg.ContextToken())
+	}
+}
+
+func TestContextTokenNil(t *testing.T) {
+	var msg *IncomingMessage
+	if msg.ContextToken() != "" {
+		t.Fatal("expected empty string for nil message")
+	}
+}

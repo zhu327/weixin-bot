@@ -359,6 +359,36 @@ func (b *Bot) sendText(ctx context.Context, userID, text, contextToken string) e
 	return nil
 }
 
+// SendRawMessage sends a single text message with explicit control over message_state and client_id.
+// This is the building block for streaming (GENERATING → FINISH) sequences demonstrated in the
+// Node.js stream-test.ts and generating-test.ts examples.
+//
+// Unlike [Bot.Reply] and [Bot.Send], this method does NOT chunk long text, does NOT auto-stop
+// typing, and does NOT generate a new client_id. The caller is responsible for:
+//   - Generating a client_id once via [GenerateClientID] and reusing it across a streaming sequence
+//   - Using [MessageStateGenerating] (1) for intermediate updates
+//   - Using [MessageStateFinish] (2) for the final message
+//   - Calling [Bot.StopTyping] when done
+//
+// contextToken can be obtained from [IncomingMessage.ContextToken] or the internal cache.
+// If contextToken is empty, the method attempts to look it up from the cache for userID.
+func (b *Bot) SendRawMessage(ctx context.Context, userID, text, contextToken, clientID string, state int) error {
+	if contextToken == "" {
+		tok, ok := b.tokenCache.Get(userID)
+		if !ok || tok == "" {
+			return fmtMissingContextToken(userID)
+		}
+		contextToken = tok
+	}
+	cred, err := b.ensureCredentials(ctx)
+	if err != nil {
+		return err
+	}
+	msg := api.BuildTextMessageRaw(userID, contextToken, text, clientID, state)
+	_, err = api.SendMessage(b.httpClient, ctx, cred.BaseURL, cred.Token, msg)
+	return wrapAPIErr(err)
+}
+
 // SendTyping requests a typing indicator for userID.
 func (b *Bot) SendTyping(ctx context.Context, userID string) error {
 	return b.sendTypingStatus(ctx, userID, api.TypingStatusStart, true)

@@ -20,7 +20,13 @@ func httpClientOrDefault(c *http.Client) *http.Client {
 }
 
 // PostJSON POSTs JSON to endpoint with Bearer token and context cancellation.
-func PostJSON(client *http.Client, ctx context.Context, baseURL, endpoint string, body any, token string) (json.RawMessage, error) {
+func PostJSON(
+	client *http.Client,
+	ctx context.Context,
+	baseURL, endpoint string,
+	body any,
+	token string,
+) (json.RawMessage, error) {
 	u := normalizeBaseURL(baseURL) + "/" + strings.TrimLeft(endpoint, "/")
 	b, err := json.Marshal(body)
 	if err != nil {
@@ -45,7 +51,12 @@ func PostJSON(client *http.Client, ctx context.Context, baseURL, endpoint string
 }
 
 // GetJSON performs a GET request without bot auth headers (QR endpoints).
-func GetJSON(client *http.Client, ctx context.Context, baseURL, path string, extraHeaders map[string]string) (json.RawMessage, error) {
+func GetJSON(
+	client *http.Client,
+	ctx context.Context,
+	baseURL, path string,
+	extraHeaders map[string]string,
+) (json.RawMessage, error) {
 	u := normalizeBaseURL(baseURL) + "/" + strings.TrimLeft(path, "/")
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {

@@ -94,6 +94,16 @@ func extractText(items []MessageItem) string {
 	return strings.Join(parts, "\n")
 }
 
+// ContextToken returns the context_token associated with this incoming message.
+// Use this when you need low-level control over message sending, e.g. for streaming
+// (GENERATING → FINISH sequences). For normal replies, use [Bot.Reply] instead.
+func (m *IncomingMessage) ContextToken() string {
+	if m == nil {
+		return ""
+	}
+	return m.contextToken
+}
+
 // decodeWeixinMessage unmarshals one message JSON object.
 func decodeWeixinMessage(raw json.RawMessage) (*WeixinMessage, error) {
 	var m WeixinMessage

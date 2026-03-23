@@ -23,9 +23,10 @@ const BotQRType = 3
 
 // Outbound wire values for BuildTextMessage (message_type / message_state).
 const (
-	OutboundMessageTypeBot     = 2
-	OutboundMessageStateFinish = 2
-	OutboundItemTypeText       = 1
+	OutboundMessageTypeBot         = 2
+	OutboundMessageStateGenerating = 1
+	OutboundMessageStateFinish     = 2
+	OutboundItemTypeText           = 1
 )
 
 // TypingStatusStart and TypingStatusStop are sendtyping status values.

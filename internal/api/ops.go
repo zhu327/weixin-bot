@@ -25,7 +25,12 @@ func GetUpdates(client *http.Client, ctx context.Context, baseURL, token, buf st
 }
 
 // SendMessage calls POST /ilink/bot/sendmessage.
-func SendMessage(client *http.Client, ctx context.Context, baseURL, token string, msg map[string]any) (json.RawMessage, error) {
+func SendMessage(
+	client *http.Client,
+	ctx context.Context,
+	baseURL, token string,
+	msg map[string]any,
+) (json.RawMessage, error) {
 	ctx, cancel := context.WithTimeout(ctx, TimeoutSendMessage)
 	defer cancel()
 	body := map[string]any{
@@ -36,7 +41,11 @@ func SendMessage(client *http.Client, ctx context.Context, baseURL, token string
 }
 
 // GetConfig calls POST /ilink/bot/getconfig.
-func GetConfig(client *http.Client, ctx context.Context, baseURL, token, userID, contextToken string) (json.RawMessage, error) {
+func GetConfig(
+	client *http.Client,
+	ctx context.Context,
+	baseURL, token, userID, contextToken string,
+) (json.RawMessage, error) {
 	ctx, cancel := context.WithTimeout(ctx, TimeoutGetConfig)
 	defer cancel()
 	body := map[string]any{
@@ -48,7 +57,12 @@ func GetConfig(client *http.Client, ctx context.Context, baseURL, token, userID,
 }
 
 // SendTyping calls POST /ilink/bot/sendtyping. status 1 = start, 2 = stop.
-func SendTyping(client *http.Client, ctx context.Context, baseURL, token, userID, ticket string, status int) (json.RawMessage, error) {
+func SendTyping(
+	client *http.Client,
+	ctx context.Context,
+	baseURL, token, userID, ticket string,
+	status int,
+) (json.RawMessage, error) {
 	ctx, cancel := context.WithTimeout(ctx, TimeoutSendTyping)
 	defer cancel()
 	body := map[string]any{
@@ -92,27 +106,37 @@ func RandomUUID() (string, error) {
 }
 
 // BuildTextMessage builds the outbound text message payload (msg field body).
+// It generates a new client_id and uses FINISH state.
 func BuildTextMessage(userID, contextToken, text string) (map[string]any, error) {
 	clientID, err := RandomUUID()
 	if err != nil {
 		return nil, err
+	}
+	return BuildTextMessageRaw(userID, contextToken, text, clientID, OutboundMessageStateFinish), nil
+}
+
+// BuildTextMessageRaw builds an outbound text message payload with explicit clientID and state.
+// Use [OutboundMessageStateGenerating] for streaming updates and [OutboundMessageStateFinish]
+// for the final message. The caller must supply a valid clientID (see [RandomUUID]).
+func BuildTextMessageRaw(userID, contextToken, text, clientID string, state int) map[string]any {
+	items := []any{}
+	if text != "" {
+		items = append(items, map[string]any{
+			"type": OutboundItemTypeText,
+			"text_item": map[string]any{
+				"text": text,
+			},
+		})
 	}
 	return map[string]any{
 		"from_user_id":  "",
 		"to_user_id":    userID,
 		"client_id":     clientID,
 		"message_type":  OutboundMessageTypeBot,
-		"message_state": OutboundMessageStateFinish,
+		"message_state": state,
 		"context_token": contextToken,
-		"item_list": []any{
-			map[string]any{
-				"type": OutboundItemTypeText,
-				"text_item": map[string]any{
-					"text": text,
-				},
-			},
-		},
-	}, nil
+		"item_list":     items,
+	}
 }
 
 // DecodeTypingTicket extracts typing_ticket from getconfig JSON response.
